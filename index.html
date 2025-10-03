@@ -4,157 +4,267 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Voice Expense Tracker</title>
-    <!-- PWA Link: Link to the Web App Manifest -->
-    <link rel="manifest" href="/manifest.json">
     <!-- Load Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- Load Inter font -->
+    <!-- Load Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap');
+        /* Custom styles for aesthetic enhancements */
         body {
             font-family: 'Inter', sans-serif;
             background-color: #f7f9fb;
         }
-        /* Custom scrollbar for expenses list */
-        .expense-list-container::-webkit-scrollbar {
-            width: 8px;
-        }
-        .expense-list-container::-webkit-scrollbar-thumb {
-            background-color: #cbd5e1;
-            border-radius: 4px;
-        }
-        /* Style for the microphone button */
         .mic-button {
-            transition: all 0.2s ease;
-            box-shadow: 0 10px 15px -3px rgba(37, 99, 235, 0.5), 0 4px 6px -2px rgba(37, 99, 235, 0.05);
+            transition: transform 0.1s ease-in-out, box-shadow 0.1s ease-in-out;
+            will-change: transform;
+            /* Aesthetic circle button */
+            width: 80px;
+            height: 80px;
         }
         .mic-button:hover {
             transform: scale(1.05);
+            box-shadow: 0 10px 15px -3px rgba(59, 130, 246, 0.5), 0 4px 6px -2px rgba(59, 130, 246, 0.05);
         }
         .mic-button.listening {
-            animation: pulse-blue 1.5s infinite;
-            background-color: #ef4444; /* Red while listening */
-            box-shadow: 1 0px 20px -5px rgba(239, 68, 68, 0.7);
+            animation: pulse-red 1.5s infinite;
+            background-color: #ef4444; /* Red for recording */
         }
-        @keyframes pulse-blue {
-            0%, 100% {
-                box-shadow: 0 0 0 0 rgba(37, 99, 235, 0.7);
-            }
-            50% {
-                box-shadow: 0 0 0 15px rgba(37, 99, 235, 0);
-            }
+        @keyframes pulse-red {
+            0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); }
+            70% { box-shadow: 0 0 0 10px rgba(239, 68, 68, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
         }
-        @media (max-width: 640px) {
-            .mic-button {
-                width: 64px;
-                height: 64px;
-            }
+        .container-card {
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 0 10px -5px rgba(0, 0, 0, 0.04);
+            max-width: 600px;
+            margin: 20px auto;
+            border-radius: 1rem;
+        }
+        .transaction-item:not(:last-child) {
+            border-bottom: 1px solid #e5e7eb;
         }
     </style>
-    <!-- Firebase Imports -->
+</head>
+<body class="p-4">
+
+    <div id="app" class="container-card bg-white p-6 md:p-8">
+        <header class="text-center mb-6">
+            <h1 class="text-3xl font-extrabold text-blue-600 flex items-center justify-center">
+                <i data-lucide="mic" class="w-6 h-6 mr-2"></i>
+                Voice Expense Tracker
+            </h1>
+            <p class="text-gray-500 mt-1">Log expenses instantly using your voice.</p>
+        </header>
+
+        <!-- Totals Display -->
+        <div class="mb-8 p-4 bg-gray-50 rounded-lg shadow-inner">
+            <h2 class="text-lg font-semibold text-gray-700">Total Expenses</h2>
+            <p id="total-expenses" class="text-4xl font-bold text-red-600 mt-1">$0.00</p>
+        </div>
+
+        <!-- Voice Input Section -->
+        <div class="text-center mb-8">
+            <button id="mic-button" class="mic-button bg-blue-500 text-white rounded-full flex items-center justify-center mx-auto shadow-lg hover:bg-blue-600 active:scale-95 transition-all">
+                <i data-lucide="mic" class="w-8 h-8"></i>
+            </button>
+            <p id="status-message" class="mt-4 text-sm font-medium text-gray-600 min-h-[1.25rem]">Click to start speaking.</p>
+        </div>
+
+        <!-- Recent Transactions -->
+        <section>
+            <h2 class="text-xl font-bold text-gray-800 mb-4 border-b pb-2">Recent Transactions</h2>
+            <div id="transactions-list" class="space-y-3 max-h-80 overflow-y-auto">
+                <!-- Transactions will be inserted here -->
+                <p class="text-gray-500 text-center py-4" id="loading-message">Loading expenses...</p>
+            </div>
+        </section>
+
+        <!-- User ID for Multi-User context -->
+        <div class="mt-8 pt-4 border-t text-sm text-gray-400 text-center">
+            User ID: <span id="user-id">Loading...</span>
+        </div>
+        
+    </div>
+
+    <!-- Firebase and core logic scripts -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged, signOut, setPersistence, browserSessionPersistence } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, doc, addDoc, onSnapshot, collection, query, serverTimestamp, orderBy } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, query, onSnapshot, addDoc, serverTimestamp, setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
         
-        // --- Global Firebase Variables (Mandatory Canvas Environment Variables) ---
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
-        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
-
-        // Global instances
-        let app;
-        let db;
-        let auth;
-        let currentUserId = null;
-        let isAuthReady = false;
+        // --- 🚨 CRITICAL FIX: FIREBASE CONFIGURATION 🚨 ---
+        // When running outside the Gemini/Canvas environment (like on GitHub Pages), 
+        // the app cannot access the __firebase_config variable.
+        // You MUST replace the placeholder below with your actual Firebase config object 
+        // from your project's console. If you don't do this, the app will fail to initialize.
         
-        // DOM Elements
-        const statusMessage = document.getElementById('status-message');
-        const totalAmountDisplay = document.getElementById('total-amount');
-        const expenseList = document.getElementById('expense-list');
-        const micButton = document.getElementById('mic-button');
-
-        // Speech Recognition setup (must handle vendor prefixes)
-        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-        let recognition = null;
-        if (SpeechRecognition) {
-            recognition = new SpeechRecognition();
-            recognition.continuous = false;
-            recognition.lang = 'en-US'; // Or dynamically set based on user's device settings
-            recognition.interimResults = false;
-            recognition.maxAlternatives = 1;
-        }
-
-        // --- Utility Functions ---
-
-        /**
-         * Simple custom modal/message display (replacing alert())
-         * @param {string} msg 
-         * @param {string} type 
-         */
-        const showStatus = (msg, type = 'info') => {
-            console.log(`[Status ${type}]: ${msg}`);
-            statusMessage.textContent = msg;
-            statusMessage.className = 'p-3 rounded-lg text-center font-medium';
-
-            if (type === 'error') {
-                statusMessage.classList.add('bg-red-100', 'text-red-800');
-            } else if (type === 'success') {
-                statusMessage.classList.add('bg-green-100', 'text-green-800');
-            } else {
-                statusMessage.classList.add('bg-blue-100', 'text-blue-800');
-            }
-
-            // Clear after 5 seconds unless it's a listening state
-            if (msg.indexOf('Listening') === -1) {
-                setTimeout(() => {
-                    statusMessage.textContent = '';
-                    statusMessage.className = '';
-                }, 5000);
-            }
+        const REAL_FIREBASE_CONFIG = {
+            apiKey: "YOUR_API_KEY", // <--- REPLACE THIS WITH YOUR REAL API KEY
+            authDomain: "YOUR_AUTH_DOMAIN",
+            projectId: "YOUR_PROJECT_ID",
+            storageBucket: "YOUR_STORAGE_BUCKET",
+            messagingSenderId: "YOUR_MESSAGING_SENDER_ID",
+            appId: "YOUR_APP_ID"
         };
+        
+        // We initialize using the canvas config if available, otherwise we use the placeholder
+        const firebaseConfig = (typeof __firebase_config !== 'undefined' && JSON.parse(__firebase_config).projectId) 
+            ? JSON.parse(__firebase_config) 
+            : REAL_FIREBASE_CONFIG;
+        
+        const appId = typeof __app_id !== 'undefined' ? __app_id : firebaseConfig.projectId || 'default-app-id';
 
-        /**
-         * Utility for exponential backoff during API calls.
-         */
-        const fetchWithBackoff = async (url, options, maxRetries = 5) => {
-            for (let attempt = 0; attempt < maxRetries; attempt++) {
+        let db, auth;
+        let currentUserId = null;
+        let recognition = null; // Will hold SpeechRecognition object
+
+        const statusMessage = document.getElementById('status-message');
+        const micButton = document.getElementById('mic-button');
+        const transactionsList = document.getElementById('transactions-list');
+        const totalExpensesElement = document.getElementById('total-expenses');
+        const userIdElement = document.getElementById('user-id');
+        const loadingMessage = document.getElementById('loading-message');
+
+        // Helper to format currency
+        const formatter = new Intl.NumberFormat('en-US', {
+            style: 'currency',
+            currency: 'USD',
+        });
+        
+        // Utility for exponential backoff during API calls
+        async function fetchWithRetry(url, options, maxRetries = 5) {
+            for (let i = 0; i < maxRetries; i++) {
                 try {
                     const response = await fetch(url, options);
-                    if (!response.ok) {
-                        throw new Error(`HTTP error! status: ${response.status}`);
+                    if (response.ok) return response;
+                    if (response.status === 429) { // Too Many Requests
+                        throw new Error('Rate limit exceeded');
                     }
-                    return response;
+                    throw new Error(`HTTP error! status: ${response.status}`);
                 } catch (error) {
-                    if (attempt === maxRetries - 1) {
-                        throw error;
-                    }
-                    const delay = Math.pow(2, attempt) * 1000 + Math.random() * 1000;
-                    console.warn(`Attempt ${attempt + 1} failed. Retrying in ${delay.toFixed(0)}ms...`, error.message);
+                    console.error(`Attempt ${i + 1} failed:`, error);
+                    if (i === maxRetries - 1) throw error;
+                    
+                    // Exponential backoff wait time
+                    const delay = Math.pow(2, i) * 1000 + Math.random() * 1000;
                     await new Promise(resolve => setTimeout(resolve, delay));
                 }
             }
-        };
+        }
+        
 
-        // --- Core Expense Logic ---
+        // --- FIREBASE INITIALIZATION ---
 
-        /**
-         * Calls the Gemini API to parse natural language into structured JSON.
-         * @param {string} transcription The raw text transcribed from voice.
-         * @returns {Promise<object | null>} Structured expense object or null on failure.
-         */
-        const parseExpenseWithGemini = async (transcription) => {
-            showStatus('Analyzing transcription with AI...');
+        function setupFirebase() {
+            if (!firebaseConfig.projectId || firebaseConfig.projectId === 'YOUR_PROJECT_ID') {
+                statusMessage.textContent = "FATAL: Firebase is not configured. Check the code for instructions.";
+                micButton.disabled = true;
+                return;
+            }
 
-            const systemPrompt = `You are a financial parsing expert. Your task is to extract the expense details (amount, category, description) from the user's spoken transcription and return the result as a strict JSON object.
-Rules:
-1. 'amount' MUST be a number (e.g., 25.50), not text.
-2. 'category' should be a single word (e.g., Food, Transport, Utilities, Entertainment, Income). If unsure, use 'Other'.
-3. 'description' should be a brief, concise summary.`;
+            try {
+                const app = initializeApp(firebaseConfig);
+                db = getFirestore(app);
+                auth = getAuth(app);
+                setLogLevel('error'); // Keep console clean unless error occurs
+                
+                // 1. Initial Authentication (uses the token from Canvas if available)
+                onAuthStateChanged(auth, async (user) => {
+                    if (user) {
+                        currentUserId = user.uid;
+                        userIdElement.textContent = currentUserId;
+                        statusMessage.textContent = "Ready! Click to start speaking.";
+                        micButton.disabled = false;
+                        loadExpenses();
+                    } else {
+                        // Sign in anonymously if no user is found (standard for public apps)
+                        if (typeof __initial_auth_token !== 'undefined') {
+                            // Use Canvas token if available
+                            await signInWithCustomToken(auth, __initial_auth_token);
+                        } else {
+                            // Fallback for public deployment outside Canvas
+                            await signInAnonymously(auth);
+                        }
+                    }
+                });
 
-            const userQuery = `The user spoke: "${transcription}". Extract the amount, category, and description.`;
-            const apiKey = "";
+            } catch (error) {
+                console.error("Firebase Initialization Failed:", error);
+                statusMessage.textContent = "Failed to initialize Firebase. Check console for details.";
+                micButton.disabled = true;
+            }
+        }
+
+        // --- EXPENSE HANDLING ---
+
+        function loadExpenses() {
+            if (!db || !currentUserId) return;
+
+            const collectionPath = `/artifacts/${appId}/users/${currentUserId}/expenses`;
+            const q = query(collection(db, collectionPath));
+
+            onSnapshot(q, (snapshot) => {
+                const expenses = [];
+                let total = 0;
+                
+                snapshot.forEach((doc) => {
+                    const data = doc.data();
+                    const amount = parseFloat(data.amount) || 0;
+                    expenses.push({ 
+                        id: doc.id, 
+                        ...data, 
+                        amount: amount 
+                    });
+                    total += amount;
+                });
+                
+                // Sort by timestamp (newest first)
+                expenses.sort((a, b) => (b.timestamp?.toMillis() || 0) - (a.timestamp?.toMillis() || 0));
+
+                renderExpenses(expenses);
+                totalExpensesElement.textContent = formatter.format(total);
+            }, (error) => {
+                console.error("Error listening to expenses:", error);
+                loadingMessage.textContent = "Error loading expenses.";
+            });
+        }
+        
+        function renderExpenses(expenses) {
+            transactionsList.innerHTML = '';
+            loadingMessage.style.display = 'none';
+
+            if (expenses.length === 0) {
+                transactionsList.innerHTML = '<p class="text-gray-500 text-center py-4">No transactions logged yet.</p>';
+                return;
+            }
+
+            expenses.forEach(expense => {
+                const date = expense.timestamp ? expense.timestamp.toDate().toLocaleDateString() : 'N/A';
+                const time = expense.timestamp ? expense.timestamp.toDate().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+                
+                const item = document.createElement('div');
+                item.className = 'transaction-item flex justify-between items-center p-3 hover:bg-gray-100 rounded-lg';
+                item.innerHTML = `
+                    <div class="flex-1 min-w-0">
+                        <p class="font-semibold text-gray-800">${expense.description || expense.category || 'Expense'}</p>
+                        <p class="text-xs text-gray-500 truncate">${expense.category ? 'Category: ' + expense.category : ''}</p>
+                        <p class="text-xs text-gray-400">${date} ${time}</p>
+                    </div>
+                    <div class="text-right">
+                        <p class="text-lg font-bold text-red-600">${formatter.format(expense.amount)}</p>
+                    </div>
+                `;
+                transactionsList.appendChild(item);
+            });
+        }
+
+
+        // --- GEMINI API CALLS ---
+
+        async function parseExpenseWithGemini(transcription) {
+            const systemPrompt = "You are an expert expense parser. Analyze the user's transcription and extract the amount, category, and a short description. The amount MUST be a numerical value (USD) without currency symbols. Categories should be simple (e.g., 'Groceries', 'Rent', 'Gas'). Only respond with a JSON object. If no amount is found, use 0.";
+            const userQuery = `Parse this expense: "${transcription}"`;
+            const apiKey = "" 
             const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=${apiKey}`;
 
             const payload = {
@@ -165,296 +275,150 @@ Rules:
                     responseSchema: {
                         type: "OBJECT",
                         properties: {
-                            "amount": { "type": "NUMBER", "description": "The numerical expense amount in dollars/currency, e.g., 50.75" },
-                            "category": { "type": "STRING", "description": "The expense category, e.g., Food, Transport, Rent. Single word preferred." },
-                            "description": { "type": "STRING", "description": "A brief description of the expense." }
+                            amount: { type: "NUMBER", description: "The numerical amount of the expense, e.g., 35.50" },
+                            category: { type: "STRING", description: "The general category, e.g., Groceries, Transport" },
+                            description: { type: "STRING", description: "A brief description of the expense." }
                         },
-                        required: ["amount", "category", "description"]
+                        propertyOrdering: ["amount", "category", "description"]
                     }
                 }
             };
 
-            try {
-                const response = await fetchWithBackoff(apiUrl, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payload)
-                });
-
-                const result = await response.json();
-                const jsonText = result.candidates?.[0]?.content?.parts?.[0]?.text;
-                
-                if (jsonText) {
-                    const expenseData = JSON.parse(jsonText);
-                    if (typeof expenseData.amount !== 'number' || expenseData.amount <= 0) {
-                        throw new Error("Parsed amount is invalid or non-positive.");
-                    }
-                    return expenseData;
+            const response = await fetchWithRetry(apiUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            
+            const result = await response.json();
+            
+            if (result.candidates && result.candidates.length > 0 && result.candidates[0].content) {
+                const jsonText = result.candidates[0].content.parts[0].text;
+                try {
+                    return JSON.parse(jsonText);
+                } catch (e) {
+                    console.error("Failed to parse AI JSON response:", jsonText, e);
+                    return null;
                 }
-                showStatus('AI failed to generate a valid JSON response.', 'error');
-                return null;
-            } catch (error) {
-                console.error("Gemini API Error:", error);
-                showStatus(`Failed to parse expense with AI: ${error.message}`, 'error');
-                return null;
             }
-        };
+            return null;
+        }
 
-        /**
-         * Saves the structured expense data to Firestore.
-         * @param {object} expenseData 
-         */
-        const saveExpenseToFirestore = async (expenseData) => {
+        async function saveExpenseToFirestore(expenseData) {
             if (!db || !currentUserId) {
-                showStatus('Database not ready. Please wait for authentication.', 'error');
+                statusMessage.textContent = "Error: Database not ready.";
                 return;
             }
+
+            const amount = parseFloat(expenseData.amount) || 0;
+            if (amount <= 0) {
+                statusMessage.textContent = "Error: Amount must be greater than zero.";
+                return;
+            }
+
+            const expenseRecord = {
+                amount: amount,
+                category: expenseData.category || 'Uncategorized',
+                description: expenseData.description || 'Logged via voice',
+                timestamp: serverTimestamp(),
+                userId: currentUserId 
+            };
             
-            showStatus('Saving expense to database...');
-            const path = `/artifacts/${appId}/users/${currentUserId}/expenses`;
-            const expensesCollection = collection(db, path);
-
             try {
-                await addDoc(expensesCollection, {
-                    ...expenseData,
-                    timestamp: serverTimestamp(),
-                    userId: currentUserId
-                });
-                showStatus('Expense saved successfully!', 'success');
-            } catch (e) {
-                console.error("Error adding document: ", e);
-                showStatus('Error saving expense to database.', 'error');
+                const collectionPath = `/artifacts/${appId}/users/${currentUserId}/expenses`;
+                await addDoc(collection(db, collectionPath), expenseRecord);
+                statusMessage.textContent = "Expense saved successfully!";
+            } catch (error) {
+                console.error("Error saving expense:", error);
+                statusMessage.textContent = "Error saving expense to database.";
             }
-        };
+        }
 
-        /**
-         * Main function to handle the entire voice flow.
-         * @param {string} transcription 
-         */
-        const handleTranscription = async (transcription) => {
-            // 1. Parse the transcription
-            const expenseData = await parseExpenseWithGemini(transcription);
+        // --- VOICE RECOGNITION ---
 
-            if (expenseData) {
-                // 2. Save to Firestore
-                await saveExpenseToFirestore(expenseData);
+        function setupSpeechRecognition() {
+            // Check for Speech Recognition API support
+            window.SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+            if (!window.SpeechRecognition) {
+                statusMessage.textContent = "Voice recognition not supported in this browser.";
+                micButton.disabled = true;
+                return;
             }
-        };
 
+            recognition = new SpeechRecognition();
+            recognition.interimResults = false;
+            recognition.lang = 'en-US';
 
-        // --- Speech Recognition Handlers ---
-
-        if (recognition) {
             recognition.onstart = () => {
                 micButton.classList.add('listening');
-                showStatus('Listening... Speak your expense (e.g., "I spent twenty-five dollars on coffee").');
+                micButton.innerHTML = `<i data-lucide="mic" class="w-8 h-8 text-white"></i>`;
+                lucide.createIcons(); // Re-render icon
+                statusMessage.textContent = "Listening...";
+            };
+
+            recognition.onresult = async (event) => {
+                const transcription = event.results[0][0].transcript;
+                statusMessage.textContent = `Heard: "${transcription}"`;
+
+                micButton.classList.remove('listening');
+                micButton.innerHTML = `<i data-lucide="loader" class="w-8 h-8 animate-spin"></i>`;
+                lucide.createIcons();
+                statusMessage.textContent = "Analyzing transcription with AI...";
+
+                const expenseData = await parseExpenseWithGemini(transcription);
+
+                if (expenseData && expenseData.amount > 0) {
+                    await saveExpenseToFirestore(expenseData);
+                } else {
+                    statusMessage.textContent = "Could not parse valid expense (amount > 0). Try again.";
+                    micButton.innerHTML = `<i data-lucide="mic" class="w-8 h-8"></i>`;
+                    lucide.createIcons();
+                }
+            };
+
+            recognition.onerror = (event) => {
+                console.error('Speech recognition error:', event.error);
+                micButton.classList.remove('listening');
+                micButton.innerHTML = `<i data-lucide="mic" class="w-8 h-8"></i>`;
+                lucide.createIcons();
+                statusMessage.textContent = `Error: ${event.error}. Try again.`;
             };
 
             recognition.onend = () => {
                 micButton.classList.remove('listening');
-                showStatus('Processing voice input...');
-            };
-
-            recognition.onerror = (event) => {
-                micButton.classList.remove('listening');
-                let message = `Speech recognition error: ${event.error}`;
-                if (event.error === 'not-allowed') {
-                    message = 'Microphone access denied. Please allow it in your browser settings.';
-                } else if (event.error === 'no-speech') {
-                    message = 'No speech detected. Try speaking closer to your device.';
+                micButton.innerHTML = `<i data-lucide="mic" class="w-8 h-8"></i>`;
+                lucide.createIcons();
+                if (statusMessage.textContent.startsWith("Heard:") || statusMessage.textContent === "Listening...") {
+                     // Only revert if no save operation is pending
+                    statusMessage.textContent = "Click to start speaking.";
                 }
-                showStatus(message, 'error');
             };
-
-            recognition.onresult = (event) => {
-                const transcript = event.results[0][0].transcript;
-                showStatus(`Heard: "${transcript}". Now parsing...`);
-                handleTranscription(transcript);
-            };
-
-            window.startSpeechRecognition = () => {
-                if (!isAuthReady) {
-                    showStatus('Authentication is still loading. Please wait.', 'info');
-                    return;
-                }
-                try {
+            
+            micButton.onclick = () => {
+                if (!micButton.classList.contains('listening')) {
                     recognition.start();
-                } catch(e) {
-                    showStatus('Error starting speech recognition. This feature is often limited to Chrome or Android devices.', 'error');
-                    console.error("Speech Start Error:", e);
+                } else {
+                    recognition.stop();
                 }
-            };
-        } else {
-            window.startSpeechRecognition = () => {
-                showStatus('Speech Recognition is not supported by your browser. Please use Chrome or a compatible mobile browser.', 'error');
             };
         }
 
-        // --- Firebase Setup and Real-time Listener ---
 
-        const setupFirebaseAndListeners = () => {
-            try {
-                app = initializeApp(firebaseConfig);
-                db = getFirestore(app);
-                auth = getAuth(app);
+        // --- INITIAL SETUP ---
 
-                // Set up authentication listener
-                onAuthStateChanged(auth, async (user) => {
-                    if (user) {
-                        currentUserId = user.uid;
-                        isAuthReady = true;
-                        document.getElementById('user-id-display').textContent = `User ID: ${user.uid}`;
-                        showStatus('Authenticated and ready to track expenses.', 'success');
-                        
-                        // Start listening to the private expense collection
-                        listenForExpenses();
+        window.onload = () => {
+            // Initialize Firebase and Auth
+            setupFirebase();
 
-                    } else {
-                        // Attempt to sign in
-                        if (initialAuthToken) {
-                             await signInWithCustomToken(auth, initialAuthToken);
-                        } else {
-                            // Fallback to anonymous sign-in
-                            await signInAnonymously(auth);
-                        }
-                    }
-                });
+            // Set up Voice Recognition
+            setupSpeechRecognition();
 
-            } catch (e) {
-                console.error("Firebase Initialization Error:", e);
-                showStatus('Failed to initialize Firebase. Check console for details.', 'error');
-            }
+            // Render Lucide icons
+            lucide.createIcons();
         };
-
-        const listenForExpenses = () => {
-            if (!db || !currentUserId) return;
-
-            const path = `/artifacts/${appId}/users/${currentUserId}/expenses`;
-            // NOTE: orderBy is kept for sorting in the app, but fetching and sorting locally 
-            // is safer to avoid Firestore index errors in this sandbox environment.
-            const q = query(collection(db, path));
-
-            // Real-time listener
-            onSnapshot(q, (snapshot) => {
-                let expenses = [];
-                let total = 0;
-                
-                snapshot.forEach((doc) => {
-                    const data = doc.data();
-                    const amount = data.amount || 0;
-                    total += amount;
-                    
-                    expenses.push({
-                        id: doc.id,
-                        amount: amount, // Keep as number for sorting
-                        category: data.category || 'N/A',
-                        description: data.description || 'No description',
-                        timestamp: data.timestamp ? data.timestamp.toDate() : new Date(0)
-                    });
-                });
-
-                // Sort locally by timestamp descending
-                expenses.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
-
-                // Update UI
-                renderExpenses(expenses);
-                totalAmountDisplay.textContent = total.toFixed(2);
-            }, (error) => {
-                console.error("Error listening to expenses:", error);
-                showStatus('Failed to fetch expenses in real-time.', 'error');
-            });
-        };
-
-        /**
-         * Renders the list of expenses to the DOM.
-         * @param {Array<object>} expenses 
-         */
-        const renderExpenses = (expenses) => {
-            expenseList.innerHTML = ''; // Clear existing list
-            
-            if (expenses.length === 0) {
-                expenseList.innerHTML = '<li class="p-4 text-center text-gray-500">No expenses recorded yet. Tap the mic to start!</li>';
-                return;
-            }
-
-            expenses.forEach(expense => {
-                const li = document.createElement('li');
-                li.className = 'p-4 border-b border-gray-100 last:border-b-0 flex justify-between items-start space-x-4 hover:bg-gray-50 transition duration-150';
-                
-                const formattedTime = expense.timestamp.toLocaleString();
-                
-                // Content Block
-                li.innerHTML = `
-                    <div class="flex-grow">
-                        <div class="font-bold text-gray-800 capitalize">${expense.description}</div>
-                        <div class="text-sm text-blue-600 font-medium mt-1 inline-block px-2 py-0.5 rounded-full bg-blue-100">${expense.category}</div>
-                        <div class="text-xs text-gray-500 mt-1">${formattedTime}</div>
-                    </div>
-                    <div class="text-lg font-extrabold text-red-600 flex-shrink-0">
-                        -$${expense.amount.toFixed(2)}
-                    </div>
-                `;
-                expenseList.appendChild(li);
-            });
-        };
-        
-        // PWA Service Worker Registration REMOVED to fix the protocol error.
-        // The manifest file link remains to enable Add-to-Home Screen functionality.
-        
-        // Initialize on window load
-        window.onload = setupFirebaseAndListeners;
 
     </script>
-</head>
-<body class="min-h-screen flex items-center justify-center p-4">
-
-    <div class="w-full max-w-lg bg-white rounded-xl shadow-2xl p-6 md:p-8">
-        <!-- Header -->
-        <header class="text-center mb-6">
-            <h1 class="text-3xl font-extrabold text-gray-900">Voice Expense Tracker</h1>
-            <p class="text-sm text-gray-500 mt-1" id="user-id-display">User ID: Loading...</p>
-        </header>
-
-        <!-- Total Expenses Display -->
-        <div class="p-5 bg-gradient-to-r from-indigo-500 to-blue-600 rounded-xl mb-6 text-white shadow-lg">
-            <p class="text-sm font-light opacity-80">Total Expenses</p>
-            <p class="text-4xl font-black mt-1">$<span id="total-amount">0.00</span></p>
-        </div>
-
-        <!-- Status Message Area -->
-        <div id="status-message" class="mb-6 h-12 flex items-center justify-center text-sm"></div>
-
-        <!-- Speak Button -->
-        <div class="flex justify-center mb-8">
-            <button id="mic-button" onclick="startSpeechRecognition()" 
-                    class="mic-button bg-blue-600 text-white w-20 h-20 rounded-full flex items-center justify-center focus:outline-none focus:ring-4 focus:ring-blue-300">
-                <!-- Microphone Icon (Lucide Icon, adapted as inline SVG) -->
-                <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather feather-mic">
-                    <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
-                    <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
-                    <line x1="12" y1="19" x2="12" y2="23"></line>
-                    <line x1="8" y1="23" x2="16" y2="23"></line>
-                </svg>
-            </button>
-        </div>
-
-        <!-- Instructions -->
-        <div class="text-center mb-6 text-sm text-gray-600 p-3 bg-gray-50 rounded-lg">
-            <p class="font-semibold mb-1">How to use:</p>
-            <p>1. Tap the microphone.</p>
-            <p>2. Speak an expense, like: "<span class="font-mono bg-gray-200 px-1 rounded">I spent forty-five fifty on gas.</span>"</p>
-            <p>3. The AI will parse and save it.</p>
-        </div>
-
-        <!-- Expense List -->
-        <h2 class="text-xl font-bold text-gray-800 mb-3">Recent Transactions</h2>
-        <div class="bg-gray-50 rounded-lg border border-gray-200 overflow-hidden shadow-inner h-64 overflow-y-auto expense-list-container">
-            <ul id="expense-list">
-                <li class="p-4 text-center text-gray-500">Loading expenses...</li>
-            </ul>
-        </div>
-
-    </div>
-
 </body>
 </html>
+
