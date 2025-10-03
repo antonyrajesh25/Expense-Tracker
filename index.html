@@ -93,18 +93,14 @@
         import { getFirestore, collection, query, onSnapshot, addDoc, serverTimestamp, setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
         
         // --- 🚨 CRITICAL FIX: FIREBASE CONFIGURATION 🚨 ---
-        // When running outside the Gemini/Canvas environment (like on GitHub Pages), 
-        // the app cannot access the __firebase_config variable.
-        // You MUST replace the placeholder below with your actual Firebase config object 
-        // from your project's console. If you don't do this, the app will fail to initialize.
-        
+        // These are the user's personal keys for their 'voice-expense-tracker-43b65' project.
         const REAL_FIREBASE_CONFIG = {
-            apiKey: "YOUR_API_KEY", // <--- REPLACE THIS WITH YOUR REAL API KEY
-            authDomain: "YOUR_AUTH_DOMAIN",
-            projectId: "YOUR_PROJECT_ID",
-            storageBucket: "YOUR_STORAGE_BUCKET",
-            messagingSenderId: "YOUR_MESSAGING_SENDER_ID",
-            appId: "YOUR_APP_ID"
+            apiKey: "AIzaSyBBhXxFZG8x6XwooYAC1GOG6NV8jrFx1vE", 
+            authDomain: "voice-expense-tracker-43b65.firebaseapp.com",
+            projectId: "voice-expense-tracker-43b65",
+            storageBucket: "voice-expense-tracker-43b65.firebasestorage.app",
+            messagingSenderId: "976691815239",
+            appId: "1:976691815239:web:d51acfec06a6e3e3df2262"
         };
         
         // We initialize using the canvas config if available, otherwise we use the placeholder
@@ -156,8 +152,9 @@
         // --- FIREBASE INITIALIZATION ---
 
         function setupFirebase() {
+            // Check against the fixed projectId to ensure configuration is correct
             if (!firebaseConfig.projectId || firebaseConfig.projectId === 'YOUR_PROJECT_ID') {
-                statusMessage.textContent = "FATAL: Firebase is not configured. Check the code for instructions.";
+                statusMessage.textContent = "FATAL: Firebase is not configured. Please edit the code with your project keys.";
                 micButton.disabled = true;
                 return;
             }
@@ -168,7 +165,7 @@
                 auth = getAuth(app);
                 setLogLevel('error'); // Keep console clean unless error occurs
                 
-                // 1. Initial Authentication (uses the token from Canvas if available)
+                // 1. Initial Authentication 
                 onAuthStateChanged(auth, async (user) => {
                     if (user) {
                         currentUserId = user.uid;
@@ -177,12 +174,10 @@
                         micButton.disabled = false;
                         loadExpenses();
                     } else {
-                        // Sign in anonymously if no user is found (standard for public apps)
+                        // Sign in anonymously for deployment outside Canvas
                         if (typeof __initial_auth_token !== 'undefined') {
-                            // Use Canvas token if available
                             await signInWithCustomToken(auth, __initial_auth_token);
                         } else {
-                            // Fallback for public deployment outside Canvas
                             await signInAnonymously(auth);
                         }
                     }
